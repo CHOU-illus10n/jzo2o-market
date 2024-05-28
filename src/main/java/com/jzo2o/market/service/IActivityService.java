@@ -21,6 +21,20 @@ import java.util.List;
 public interface IActivityService extends IService<Activity> {
 
     /**
+     * 扣减库存
+     * @param id 活动id
+     *  如果扣减库存失败抛出异常
+     */
+    public void deductStock(Long id);
+
+    /**
+     * 从缓存中获取活动信息
+     * @param id
+     * @return
+     */
+    ActivityInfoResDTO getActivityInfoByIdFromCache(Long id);
+
+    /**
      * 分页查询活动
      *
      * @param activityQueryForPageReqDTO
@@ -52,4 +66,12 @@ public interface IActivityService extends IService<Activity> {
      * 2.活动中产生的未使用的优惠券作废
      */
     void revoke(Long id);
+
+
+    /**
+     * 活动预热
+     */
+    void preHeat();
+
+    List<SeizeCouponInfoResDTO> listActivity(Integer tabType);
 }
