@@ -2,6 +2,7 @@ package com.jzo2o.market.service.impl;
 
 import cn.hutool.db.DbRuntimeException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.injector.methods.SelectById;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.jzo2o.api.market.dto.request.CouponUseBackReqDTO;
@@ -75,6 +76,58 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
 
     @Resource
     private ICouponWriteOffService couponWriteOffService;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CouponUseResDTO use(CouponUseReqDTO couponUseReqDTO) {
+        //判空
+        if (ObjectUtils.isNull(couponUseReqDTO.getOrdersId()) ||
+                ObjectUtils.isNull(couponUseReqDTO.getTotalAmount()))
+        {
+            throw new BadRequestException("优惠券核销的订单信息为空");
+        }
+        Long userId = UserContext.currentUserId();
+        Coupon coupon = getById(couponUseReqDTO.getId());
+        // 优惠券判空
+        if (coupon == null ) {
+            throw new BadRequestException("优惠券不存在");
+        }
+        if ( ObjectUtils.notEqual(coupon.getUserId(),userId)) {
+            throw new BadRequestException("只允许核销自己的优惠券");
+        }
+        //更新优惠券表的状态
+        boolean update = lambdaUpdate()
+                .eq(Coupon::getId, couponUseReqDTO.getId())
+                .eq(Coupon::getStatus, CouponStatusEnum.NO_USE.getStatus())
+                .gt(Coupon::getValidityTime, LocalDateTime.now())
+                .le(Coupon::getAmountCondition, couponUseReqDTO.getTotalAmount())//满减金额小于总金额 才可以使用该优惠券
+                .set(Coupon::getOrdersId, couponUseReqDTO.getOrdersId())
+                .set(Coupon::getStatus, CouponStatusEnum.USED.getStatus())
+                .set(Coupon::getUseTime, DateUtils.now())
+                .update();
+        if(!update){
+            throw new DBException("优惠券核销失败");
+        }
+        //添加核销记录
+        CouponWriteOff couponWriteOff = CouponWriteOff.builder()
+                .id(IdUtils.getSnowflakeNextId())
+                .couponId(couponUseReqDTO.getId())
+                .userId(userId)
+                .ordersId(couponUseReqDTO.getOrdersId())
+                .activityId(coupon.getActivityId())
+                .writeOffTime(DateUtils.now())
+                .writeOffManName(coupon.getUserName())
+                .writeOffManPhone(coupon.getUserPhone())
+                .build();
+        if(!couponWriteOffService.save(couponWriteOff)){
+            throw new DBException("优惠券核销失败");
+        }
+        //计算优惠金额并返回
+        BigDecimal discountAmount = CouponUtils.calDiscountAmount(coupon, couponUseReqDTO.getTotalAmount());
+        CouponUseResDTO couponUseResDTO = new CouponUseResDTO();
+        couponUseResDTO.setDiscountAmount(discountAmount);
+        return couponUseResDTO;
+    }
 
     @Override
     public PageResult<CouponInfoResDTO> queryForPageOfOperation(CouponOperationPageQueryReqDTO couponOperationPageQueryReqDTO) {
@@ -200,5 +253,33 @@ public class CouponServiceImpl extends ServiceImpl<CouponMapper, Coupon> impleme
             throw new CommonException(SEIZE_COUPON_FAILD, "已抢光!");
         }
         throw new CommonException(SEIZE_COUPON_FAILD, "抢券失败");
+    }
+
+    @Override
+    public List<AvailableCouponsResDTO> getAvailable(BigDecimal totalAmount) {
+        Long userId = UserContext.currentUserId();
+        List<Coupon> coupons = lambdaQuery()//查询优惠券列表
+                .eq(Coupon::getUserId, userId)
+                .gt(Coupon::getValidityTime, DateUtils.now())
+                .eq(Coupon::getStatus, CouponStatusEnum.NO_USE.getStatus())
+                .le(Coupon::getAmountCondition, totalAmount)
+                .list();
+        if(CollUtils.isEmpty(coupons)){
+            return new ArrayList<>();
+        }
+
+        List<AvailableCouponsResDTO> availableCouponsResDTOS = coupons.stream()
+                .peek(coupon -> coupon.setDiscountAmount(CouponUtils.calDiscountAmount(coupon, totalAmount)))
+                //过滤掉 优惠金额大于订单金额的优惠券
+                .filter(coupon ->
+                        coupon.getDiscountAmount().compareTo(new BigDecimal(0)) > 0
+                                && coupon.getDiscountAmount().compareTo(totalAmount) < 0)
+                //类型转换
+                .map(coupon -> BeanUtils.copyBean(coupon, AvailableCouponsResDTO.class))
+                //按优惠金额降序排列
+                .sorted(Comparator.comparing(AvailableCouponsResDTO::getDiscountAmount).reversed())
+                .collect(Collectors.toList());
+
+        return availableCouponsResDTOS;
     }
 }

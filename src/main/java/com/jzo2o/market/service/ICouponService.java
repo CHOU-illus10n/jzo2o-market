@@ -10,6 +10,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.jzo2o.market.model.dto.request.CouponOperationPageQueryReqDTO;
 import com.jzo2o.market.model.dto.request.SeizeCouponReqDTO;
 import com.jzo2o.market.model.dto.response.CouponInfoResDTO;
+import org.springframework.web.bind.annotation.PostMapping;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -23,6 +24,13 @@ import java.util.List;
  * @since 2023-09-16
  */
 public interface ICouponService extends IService<Coupon> {
+
+    /**
+     * 使用优惠券
+     * @param couponUseReqDTO
+     */
+    CouponUseResDTO use(CouponUseReqDTO couponUseReqDTO);
+
 
     /**
      * 运营端查询同一个活动的优惠券
@@ -63,4 +71,11 @@ public interface ICouponService extends IService<Coupon> {
     void processExpireCoupon();
 
     void seizeCoupon(SeizeCouponReqDTO seizeCouponReqDTO);
+
+    /**
+     * 获取可用优惠券列表
+     * @param totalAmount
+     * @return
+     */
+    List<AvailableCouponsResDTO> getAvailable(BigDecimal totalAmount);
 }
